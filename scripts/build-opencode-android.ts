@@ -86,7 +86,7 @@ const result = await Bun.build({
   format: "esm",
   minify: true,
   sourcemap: "none",
-  splitting: true,
+  splitting: false,
   compile: {
     autoloadBunfig: false,
     autoloadDotenv: false,
