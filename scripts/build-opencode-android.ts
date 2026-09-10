@@ -84,9 +84,17 @@ const result = await Bun.build({
   plugins: [plugin],
   external: ["node-gyp"],
   format: "esm",
-  minify: false,
+  // minify: false is required: Bun 1.3.2's minifier renames bindings that
+// the Bun 1.2.13-canary.1 Android standalone loader cannot resolve,
+// producing 'ReferenceError: <sym> is not defined' at startup.
+minify: false,
   sourcemap: "none",
-  splitting: false,
+  // splitting: false is required: enabling code splitting produces a
+// circular chunk dependency between drizzle-orm pg-core chunks
+// (chunk-esazrzrp <-> chunk-zpkxvayj), which the 1.2.13 module graph
+// loader cannot reconcile, producing
+// 'TypeError: The superclass is not a constructor'.
+splitting: false,
   compile: {
     autoloadBunfig: false,
     autoloadDotenv: false,
