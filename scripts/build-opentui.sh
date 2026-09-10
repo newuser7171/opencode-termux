@@ -199,6 +199,21 @@ yoga_text = yoga_text.replace(
     "const callback_allocator = std.heap.page_allocator;",
 )
 yoga_zig.write_text(yoga_text)
+
+# v0.4.5 dropped implicit libc linking. miniaudio_shim.c and yoga's
+# C++ files need malloc/free/posix_memalign, so turn link_libc back on.
+build_zig = zig_dir / "build.zig"
+bz = build_zig.read_text()
+if ".link_libc = true" not in bz:
+    old = ".optimize = optimize,\n    });"
+    new = ".optimize = optimize,\n        .link_libc = true,\n    });"
+    if old in bz:
+        bz = bz.replace(old, new, 1)
+        build_zig.write_text(bz)
+        print(">>> build.zig: set .link_libc = true")
+    else:
+        print(">>> build.zig: WARNING anchor not found")
+        print(bz)
 PY
 fi
 
