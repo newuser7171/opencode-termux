@@ -69,6 +69,45 @@ const workerPath = "./src/cli/tui/worker.ts"
 console.log(`Parser worker: ${parserWorkerResolved}`)
 console.log(`OpenCode worker: ${workerPath}`)
 
+// Guard normalizeLoadedFilePath against undefined loadedPath (opencode #37556).
+// OpenTUI 0.4.5 added a module-scope top-level await that resolves the
+// tree-sitter parser worker at import time. Because this script also passes
+// parser.worker.js as a Bun.build entrypoint, the
+// import(..., { with: { type: "file" } }) resolves to a JS module namespace
+// whose .default is undefined. That undefined flows into
+// normalizeLoadedFilePath, which then calls .startsWith on it -> fatal TUI
+// crash before render. Patch the OpenTUI chunk in node_modules BEFORE
+// Bun.build runs, so the guard is baked into the final bundle.
+{
+  const glob = new Bun.Glob(
+    "node_modules/.bun/@opentui+core@0.4.5*/node_modules/@opentui/core/chunk-bun-*.js"
+  )
+  let guarded = 0
+  for await (const rel of glob.scan({ cwd: OPENCODE_DIR })) {
+    const full = `${OPENCODE_DIR}/${rel}`
+    const text = await Bun.file(full).text()
+    if (!text.includes("normalizeLoadedFilePath")) continue
+    if (text.includes('(loadedPath ?? "").startsWith')) {
+      console.log(`    already guarded: ${rel}`)
+      continue
+    }
+    const patched = text.replaceAll(
+      "loadedPath.startsWith(",
+      '(loadedPath ?? "").startsWith('
+    )
+    if (patched === text) {
+      console.log(`    no replaceable call in ${rel}`)
+      continue
+    }
+    await Bun.write(full, patched)
+    console.log(`    guarded normalizeLoadedFilePath in ${rel}`)
+    guarded++
+  }
+  if (guarded === 0) {
+    console.log("    note: no @opentui/core chunk matched the guard patch")
+  }
+}
+
 await $`rm -rf ${OUTPUT_DIR}`
 await $`mkdir -p ${OUTPUT_DIR}`
 
