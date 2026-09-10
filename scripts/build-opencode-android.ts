@@ -69,63 +69,7 @@ const workerPath = "./src/cli/tui/worker.ts"
 console.log(`Parser worker: ${parserWorkerResolved}`)
 console.log(`OpenCode worker: ${workerPath}`)
 
-// Guard normalizeLoadedFilePath against undefined loadedPath (opencode #37556).
-// OpenTUI 0.4.5 added a module-scope top-level await that resolves the
-// tree-sitter parser worker at import time. Because this script also passes
-// parser.worker.js as a Bun.build entrypoint, the
-// import(..., { with: { type: "file" } }) resolves to a JS module namespace
-// whose .default is undefined. That undefined flows into
-// normalizeLoadedFilePath, which then calls .startsWith on it -> fatal TUI
-// crash before render. Patch the OpenTUI chunk in node_modules BEFORE
-// Bun.build runs, so the guard is baked into the final bundle.
-{
-  const glob = new Bun.Glob(
-    "node_modules/.bun/@opentui+core@*/node_modules/@opentui/core/chunk-bun-*.js"
-  )
-  let guarded = 0
-  for await (const rel of glob.scan({ cwd: OPENCODE_DIR })) {
-    const full = `${OPENCODE_DIR}/${rel}`
-    const text = await Bun.file(full).text()
-    if (!text.includes("normalizeLoadedFilePath")) continue
-    if (text.includes('(loadedPath ?? "").startsWith')) {
-      console.log(`    already guarded: ${rel}`)
-      continue
-    }
-    const patched = text.replaceAll(
-      "loadedPath.startsWith(",
-      '(loadedPath ?? "").startsWith('
-    )
-    if (patched === text) {
-      console.log(`    no replaceable call in ${rel}`)
-      continue
-    }
-    await Bun.write(full, patched)
-    console.log(`    guarded normalizeLoadedFilePath in ${rel}`)
-    guarded++
-  }
-  if (guarded === 0) {
-    console.log("    trying hoisted layout...")
-    const glob2 = new Bun.Glob("node_modules/@opentui/core/chunk-bun-*.js")
-    for await (const rel of glob2.scan({ cwd: OPENCODE_DIR })) {
-      const full = `${OPENCODE_DIR}/${rel}`
-      const text = await Bun.file(full).text()
-      if (!text.includes("normalizeLoadedFilePath")) continue
-      if (text.includes('(loadedPath ?? "").startsWith')) continue
-      const patched = text.replaceAll(
-        "loadedPath.startsWith(",
-        '(loadedPath ?? "").startsWith('
-      )
-      if (patched !== text) {
-        await Bun.write(full, patched)
-        console.log(`    guarded (hoisted) in ${rel}`)
-        guarded++
-      }
-    }
-  }
-  if (guarded === 0) {
-    console.log("    note: no @opentui/core chunk matched the guard patch")
-  }
-}
+
 
 await $`rm -rf ${OUTPUT_DIR}`
 await $`mkdir -p ${OUTPUT_DIR}`
@@ -136,10 +80,43 @@ const plugin = createSolidTransformPlugin()
 const bunfsRoot = "/$bunfs/root/"
 const workerRelativePath = path.relative(OPENCODE_DIR, parserWorkerResolved).replaceAll("\\", "/")
 
+// Plugin: rewrite OpenTUI's normalizeLoadedFilePath so it returns early on
+// undefined. OpenTUI 0.4.5 does a module-scope await on
+// import("@opentui/core/parser.worker", { with: { type: "file" } }). Because
+// this build also passes parser.worker.js as a Bun.build entrypoint, that
+// import resolves to a JS namespace whose .default is undefined. The
+// undefined flows into normalizeLoadedFilePath, which calls .startsWith and
+// then path.resolve on it -> TUI crashes before render.
+//
+// Upstream issue: opencode #37556
+//
+// We rewrite the function header at bundle time so the undefined is returned
+// immediately. Downstream callers (which already use ?? fallbacks) then take
+// the graceful path.
+const patchOpenTuiPlugin: import("bun").BunPlugin = {
+  name: "patch-opentui-normpath",
+  setup(build) {
+    build.onLoad({ filter: /@opentui\/core\/.*\.js$/ }, async (args) => {
+      let text = await Bun.file(args.path).text()
+      if (text.includes("normalizeLoadedFilePath") && !/loadedPath\s*==\s*null/.test(text)) {
+        const before = text
+        text = text.replace(
+          /function\s+normalizeLoadedFilePath\s*\(\s*(\w+)\s*,\s*([^)]+)\)\s*\{/,
+          (m, p1, p2) => `${m} if (${p1} == null) return ${p1};`
+        )
+        if (text !== before) {
+          console.log(`[patch-opentui-normpath] guarded ${args.path}`)
+        }
+      }
+      return { contents: text, loader: "js" }
+    })
+  },
+}
+
 const result = await Bun.build({
   conditions: ["bun", "node"],
   tsconfig: "./tsconfig.json",
-  plugins: [plugin],
+  plugins: [plugin, patchOpenTuiPlugin],
   external: ["node-gyp"],
   format: "esm",
   // minify: false is required: Bun 1.3.2's minifier renames bindings that
