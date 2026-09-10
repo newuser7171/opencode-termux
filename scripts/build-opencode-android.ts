@@ -84,7 +84,7 @@ const result = await Bun.build({
   plugins: [plugin],
   external: ["node-gyp"],
   format: "esm",
-  minify: true,
+  minify: false,
   sourcemap: "none",
   splitting: false,
   compile: {
