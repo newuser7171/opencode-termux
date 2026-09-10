@@ -80,7 +80,7 @@ console.log(`OpenCode worker: ${workerPath}`)
 // Bun.build runs, so the guard is baked into the final bundle.
 {
   const glob = new Bun.Glob(
-    "node_modules/.bun/@opentui+core@0.4.5*/node_modules/@opentui/core/chunk-bun-*.js"
+    "node_modules/.bun/@opentui+core@*/node_modules/@opentui/core/chunk-bun-*.js"
   )
   let guarded = 0
   for await (const rel of glob.scan({ cwd: OPENCODE_DIR })) {
@@ -102,6 +102,25 @@ console.log(`OpenCode worker: ${workerPath}`)
     await Bun.write(full, patched)
     console.log(`    guarded normalizeLoadedFilePath in ${rel}`)
     guarded++
+  }
+  if (guarded === 0) {
+    console.log("    trying hoisted layout...")
+    const glob2 = new Bun.Glob("node_modules/@opentui/core/chunk-bun-*.js")
+    for await (const rel of glob2.scan({ cwd: OPENCODE_DIR })) {
+      const full = `${OPENCODE_DIR}/${rel}`
+      const text = await Bun.file(full).text()
+      if (!text.includes("normalizeLoadedFilePath")) continue
+      if (text.includes('(loadedPath ?? "").startsWith')) continue
+      const patched = text.replaceAll(
+        "loadedPath.startsWith(",
+        '(loadedPath ?? "").startsWith('
+      )
+      if (patched !== text) {
+        await Bun.write(full, patched)
+        console.log(`    guarded (hoisted) in ${rel}`)
+        guarded++
+      }
+    }
   }
   if (guarded === 0) {
     console.log("    note: no @opentui/core chunk matched the guard patch")
