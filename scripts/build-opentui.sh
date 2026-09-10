@@ -15,9 +15,9 @@ source "$SCRIPT_DIR/env.sh"
 ZIG_BIN="${ZIG_BIN:-zig}"
 
 # Pin opentui to the exact version that OpenCode depends on.
-# This commit corresponds to @opentui/core v0.4.5. We still patch its Zig
+# This commit corresponds to @opentui/core v0.4.5 (dereferenced tag). We still patch its Zig
 # build so the produced .so has a NEEDED: libc.so entry for Android dlopen().
-OPENTUI_COMMIT="3e2d0aabeb47923f05adc6f1052401367cfde3d4"
+OPENTUI_COMMIT="0c8c4f7cff2927e3df63a9757a45eff9a343611c"
 
 echo "=== Building libopentui.so for Android aarch64 ==="
 
