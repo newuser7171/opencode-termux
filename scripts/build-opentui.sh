@@ -220,9 +220,31 @@ fi
 echo ">>> Building with Zig (target: aarch64-linux-android)..."
 cd "$OPENTUI_ZIG_DIR"
 
+# Zig 0.15.2 does not ship prebuilt Bionic libc. Provide a libc.txt that
+# points at the NDK sysroot, then pass it via --libc. See ziglang/zig#23906.
+NDK_HOME="${ANDROID_NDK_HOME:-/opt/android-ndk}"
+NDK_SYSROOT="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+API_LEVEL="${ANDROID_API:-29}"
+if [ ! -d "$NDK_SYSROOT/usr/lib/aarch64-linux-android/$API_LEVEL" ]; then
+  AVAIL=$(ls "$NDK_SYSROOT/usr/lib/aarch64-linux-android/" 2>/dev/null | grep -E '^[0-9]+$' | sort -n | tail -1)
+  [ -n "$AVAIL" ] && API_LEVEL="$AVAIL"
+fi
+LIBC_TXT="$OPENTUI_ZIG_DIR/libc-android.txt"
+{
+  echo "include_dir=$NDK_SYSROOT/usr/include"
+  echo "sys_include_dir=$NDK_SYSROOT/usr/include/aarch64-linux-android"
+  echo "crt_dir=$NDK_SYSROOT/usr/lib/aarch64-linux-android/$API_LEVEL"
+  echo "msvc_lib_dir="
+  echo "kernel32_lib_dir="
+  echo "gcc_dir="
+} > "$LIBC_TXT"
+echo ">>> Generated libc.txt for API $API_LEVEL:"
+cat "$LIBC_TXT"
+
 "$ZIG_BIN" build \
     -Dtarget=aarch64-linux-android \
     -Doptimize=ReleaseFast \
+    --libc "$LIBC_TXT" \
     --prefix . 2>&1
 
 # The build.zig installs to dest_dir="../lib/{output_name}" relative to
