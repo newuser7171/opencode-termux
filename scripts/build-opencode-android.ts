@@ -230,6 +230,33 @@ if (undiciPatchCount === 0) {
   console.log(`Patched ${undiciPatchCount} undici occurrence(s)`)
 }
 
+// Fix opencode #37556: normalizeLoadedFilePath crashes when loadedPath is
+// undefined. This happens because parser.worker.js is passed as a Bun.build
+// entrypoint, so its `import(..., { with: { type: "file" } })` resolves to a
+// JS module namespace whose .default is undefined, and .startsWith then
+// throws "undefined is not an object (evaluating 'loadedPath.startsWith')".
+// Replace with optional chaining. Same byte length, so no offset rebuild.
+{
+  const lpSearch = Buffer.from('if (loadedPath.startsWith("file:"))')
+  const lpReplace = Buffer.from('if(loadedPath?.startsWith("file:"))')
+  if (lpSearch.length !== lpReplace.length) {
+    throw new Error("loadedPath patch length mismatch; offsets must be rebuilt")
+  }
+  let patched = 0
+  let idx = 0
+  while (true) {
+    idx = moduleGraph.indexOf(lpSearch, idx)
+    if (idx < 0) break
+    lpReplace.copy(moduleGraph, idx)
+    patched++
+    idx += lpSearch.length
+  }
+  console.log(`Patched loadedPath guard in module graph: ${patched} occurrence(s)`)
+  if (patched === 0) {
+    console.log("WARNING: loadedPath guard pattern not found in module graph")
+  }
+}
+
 console.log("\n=== Step 6: Creating Android standalone binary ===")
 const androidBunBytes = new Uint8Array(await Bun.file(ANDROID_BUN).arrayBuffer())
 const outputSize = androidBunBytes.length + moduleGraph.length + 8
